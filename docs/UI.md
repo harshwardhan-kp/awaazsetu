@@ -22,3 +22,7 @@ React 19 / TypeScript / Vite application. Warm cream, navy, teal and muted orang
 ## Boundaries
 
 The drill banner warns that this is not an emergency response service. Locations require verification before acting; scores are advisory and not field validated. Map tiles and Google font loading require internet; system fonts are fallback. Contact fields never appear in console incident data. Tokens are per-tab and removed on 401/sign out. Resident tracking links grant access to that ticket and should be kept private. Gateway/AI configuration and live SMS/Telegram/voice capability are backend concerns.
+
+## Voice read-back confirmation
+
+Resident audio now previews in a playback control. With consent checked, Marathi/Hindi/English users select the localized Transcribe and review action. POST `/api/transcriptions` returns an editable transcript without creating a ticket. Sending stays disabled until the user confirms the reviewed transcript; editing or replacing audio clears that confirmation. Final submission sends the corrected text to `/api/reports` with channel `voice`, preserving contact/GPS/consent and the 4000-character limit. The audio is transcribed once, rather than again on final submission. Provider errors remain explicit. Seven browser contract tests include preview consent/review gates, edited voice text payload, single transcription, unavailable-provider error and replacement-audio reset.

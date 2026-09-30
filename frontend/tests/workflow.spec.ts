@@ -174,3 +174,98 @@ for (const width of [390, 768, 1440])
       fullPage: true,
     });
   });
+
+test("voice preview requires consent and review, submits edited text once", async ({
+  page,
+}) => {
+  let previews = 0;
+  await page.route("**/api/transcriptions", async (route) => {
+    previews++;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ text: "Water near the landmark", language: "en" }),
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("अहवालाची भाषा").selectOption("en");
+  await page
+    .locator("input[type=file]")
+    .setInputFiles({
+      name: "voice.wav",
+      mimeType: "audio/wav",
+      buffer: Buffer.from("test audio fixture"),
+    });
+  await expect(
+    page.getByRole("button", { name: "Transcribe and review" }),
+  ).toBeDisabled();
+  await page.getByLabel("I agree to share").check();
+  await page.getByRole("button", { name: "Transcribe and review" }).click();
+  await expect(page.getByLabel("Describe the situation")).toHaveValue(
+    "Water near the landmark",
+  );
+  await expect(
+    page.getByRole("button", { name: "Send report", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByLabel("Describe the situation")
+    .fill("Corrected: knee deep water near Ekta Nagar.");
+  await page.getByLabel("I reviewed this transcript").check();
+  const submitted = page.waitForRequest(
+    (r) =>
+      new URL(r.url()).pathname === "/api/reports" && r.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Send report", exact: true }).click();
+  expect((await submitted).postDataJSON()).toMatchObject({
+    text: "Corrected: knee deep water near Ekta Nagar.",
+    channel: "voice",
+    language: "en",
+    consent: true,
+  });
+  await expect(page.getByText("Your voice has been received")).toBeVisible();
+  expect(previews).toBe(1);
+});
+test("voice provider errors stay visible; replacement audio clears review", async ({
+  page,
+}) => {
+  let calls = 0;
+  await page.route("**/api/transcriptions", async (route) => {
+    calls++;
+    await route.fulfill({
+      status: calls === 1 ? 503 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        calls === 1
+          ? { detail: "Transcription is not configured" }
+          : { text: "Original transcript", language: "en" },
+      ),
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("अहवालाची भाषा").selectOption("en");
+  await page
+    .locator("input[type=file]")
+    .setInputFiles({
+      name: "first.wav",
+      mimeType: "audio/wav",
+      buffer: Buffer.from("fixture"),
+    });
+  await page.getByLabel("I agree to share").check();
+  await page.getByRole("button", { name: "Transcribe and review" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Transcription is not configured",
+  );
+  await page.getByRole("button", { name: "Transcribe and review" }).click();
+  await page.getByLabel("I reviewed this transcript").check();
+  await page
+    .locator("input[type=file]")
+    .setInputFiles({
+      name: "second.wav",
+      mimeType: "audio/wav",
+      buffer: Buffer.from("replacement"),
+    });
+  await expect(page.getByLabel("Describe the situation")).toHaveValue("");
+  await expect(page.getByLabel("I reviewed this transcript")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Send report", exact: true }),
+  ).toBeDisabled();
+});

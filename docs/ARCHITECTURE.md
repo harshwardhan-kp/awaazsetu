@@ -25,7 +25,7 @@ Retention purge runs at startup, daily while the process runs, and via private `
 
 ## Deliberate boundaries
 
-Speech provider is OpenAI, rather than claiming IndicConformer has been installed/evaluated. IndicConformer/Sarvam adapters are not included. Location matching is offline; no report text sent to a live geocoder. Pilot-area groups are not official administrative wards. Coverage compares reports to explicitly synthetic drill assignments, not inferred population exposure. No live112/PMC integration, mass telecom sending, real emergency dispatch or model training. Voice read-back confirmation before accepting a report and OTP verification for public phone numbers remain follow-up work.
+Speech provider is OpenAI, rather than claiming IndicConformer has been installed/evaluated. IndicConformer/Sarvam adapters are not included. Location matching is offline; no report text sent to a live geocoder. Pilot-area groups are not official administrative wards. Coverage compares reports to explicitly synthetic drill assignments, not inferred population exposure. No live112/PMC integration, mass telecom sending, real emergency dispatch or model training. Browser voice intake includes an editable transcript and explicit review before final submission. Telegram voice read-back confirmation and OTP verification for public phone numbers remain follow-up work.
 
 ## Sources used for integrations
 

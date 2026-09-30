@@ -25,7 +25,7 @@ Open http://127.0.0.1:8000. For development run `npm --prefix frontend run dev` 
 
 ## Implemented modules
 
-- **M1:** validated consent-based text intake; browser recording/audio uploads; OpenAI speech transcription; OGG conversion; authenticated SMSGate and Telegram webhooks; idempotency and request/body limits. Actual Android/SIM and Telegram bot provisioning remain external setup.
+- **M1:** validated consent-based text intake; browser recording/audio uploads with editable transcript review; OpenAI speech transcription; OGG conversion; authenticated SMSGate and Telegram webhooks; idempotency and request/body limits. Actual Android/SIM and Telegram bot provisioning remain external setup.
 - **M2:** strict-schema AI extraction plus multilingual keyword fallback; transparent proposal scoring; bounded embedding/lexical comparisons; conservative location/time/type merge gates; human review. Counts corroboration only from authenticated inbound senders.
 - **M3:** 449 source-linked OpenStreetMap places plus one explicitly approximate Ekta Nagar anchor; multilingual aliases; fuzzy matching; ambiguity/unknown clarification; GPS bounds; private Leaflet map; coordinator queue, source reports, notes, status and explained manual merge override.
 - **M4:** localized acknowledgements/status/landmark prompts; encrypted delivery contacts; durable retry outbox; SMS delivery events; JOIN/STOP area subscriptions; language-specific opted-in alerts; drill coverage baselines; private CSV export; retention maintenance.
@@ -49,9 +49,10 @@ Tests isolate their database and disable paid AI/delivery. The 150-case syntheti
 - `docs/ARCHITECTURE.md`: interfaces, privacy and limitations.
 - `docs/TRIAGE.md`, `docs/LOCATION.md`, `docs/UI.md`: module details and provenance.
 - `docs/DRILL.md`: mock-drill scripts, consent and data-labelling templates.
+- `docs/EVALUATION.md`: offline held-out accuracy, severity, duplicate, location, WER, latency and feedback metrics.
 
 ## Hosting boundaries
 
-Azure App Service plan `awaazsetu-free` is F1 / Free; Vercel serves the static frontend and proxies the API. Free hosting can sleep or hit platform quotas; an instant/60-second response is not guaranteed. OpenAI API requests are metered separately; server caps AI reservations at200 per UTC day and audio at10MB / Telegram2 minutes. Each extraction, transcription or embedding request consumes a reservation; provider failures still consume the reservation. Outbound delivery is **disabled** until real gateways are configured. Public web phone numbers are stored encrypted but never trigger SMS or independent-sender corroboration until ownership verification is implemented. Tracking links provide updates immediately.
+Azure App Service plan `awaazsetu-free` is F1 / Free; Vercel serves the static frontend and proxies the API. Free hosting can sleep or hit platform quotas; an instant/60-second response is not guaranteed. OpenAI API requests are metered separately; server caps AI reservations at200 per UTC day and audio at10MB /2minutes. Each extraction, transcription or embedding request consumes a reservation; provider failures still consume the reservation. Outbound delivery is **disabled** until real gateways are configured. Public web phone numbers are stored encrypted but never trigger SMS or independent-sender corroboration until ownership verification is implemented. Tracking links provide updates immediately.
 
 OSM data © OpenStreetMap contributors, ODbL. Coordinates and pilot-area grouping are not validated ward boundaries. Synthetic drill baselines are labelled explicitly.

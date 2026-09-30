@@ -167,6 +167,31 @@ async def create_report(
     return await intake(db, payload)
 
 
+@app.post("/api/transcriptions")
+async def voice_preview(
+    request: Request,
+    audio: UploadFile = File(...),
+    language: str | None = Form(None),
+    consent: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    rate_limit(request, "voice", 5, 60)
+    if not consent:
+        raise HTTPException(422, "Consent is required")
+    if language not in {None, "", "en", "hi", "mr"}:
+        raise HTTPException(422, "Unsupported language")
+    if not budget(db):
+        raise HTTPException(
+            503,
+            "Voice service is unavailable or daily usage limit reached. Please send text.",
+        )
+    data = await audio.read(settings.voice_max_bytes + 1)
+    if len(data) > settings.voice_max_bytes:
+        raise HTTPException(413, "Audio must be under 10 MB")
+    text = await transcribe(data, audio.filename or "recording.webm", language or None)
+    return {"text": text, "language": language or None}
+
+
 @app.post("/api/reports/voice")
 async def create_voice(
     request: Request,
@@ -567,7 +592,7 @@ async def seed(db: Session = Depends(get_db)):
         if not result.get("duplicate"):
             added += 1
         else:
-            # Refresh only unreviewed synthetic single-report fixtures after policy/resolver changes.
+            # Refresh only synthetic single-report fixtures after policy/resolver changes.
             old = db.scalar(
                 select(Report).where(Report.idempotency_key == f"demo-v1-{n}")
             )
@@ -582,7 +607,7 @@ async def seed(db: Session = Depends(get_db)):
                     .select_from(Report)
                     .where(Report.incident_id == i.id)
                 )
-                if count == 1 and i.status == "new":
+                if count == 1:
                     i.incident_type = old.fields["incident_type"]
                     i.summary = old.fields["summary"]
                     for field in ["latitude", "longitude", "location_name", "ward"]:

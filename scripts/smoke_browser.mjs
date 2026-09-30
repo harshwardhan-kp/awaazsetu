@@ -24,6 +24,18 @@ try{
  await page.getByRole('button',{name:'Send report',exact:true}).click();
  await checked('Real hosted text intake and private tracking link',async()=>{await page.getByRole('heading',{name:'Your voice has been received'}).waitFor({timeout:60000});await page.getByRole('link',{name:'Track your report'}).click();await page.getByRole('heading',{name:'Follow your ticket.'}).waitFor({timeout:10000})});
  const trackURL=page.url();
+ await page.goto(origin);await page.locator('select').first().selectOption('en');
+ await page.locator('input[type=file]').setInputFiles(path.join(root,'work/voice-demo.wav'));
+ // The original consent checkbox remains the only checkbox before transcript review.
+ await page.getByRole('checkbox').first().check();
+ await page.getByRole('button',{name:'Transcribe and review',exact:true}).click();
+ await page.getByLabel('I reviewed this transcript and corrected any errors.').waitFor({timeout:60000});
+ await checked('Real hosted editable voice preview before report creation',async()=>{assert.match(await page.locator('textarea').inputValue(),/flood drill/i)});
+ await page.getByLabel('I reviewed this transcript and corrected any errors.').check();
+ await page.getByRole('button',{name:'Send report',exact:true}).click();
+ await page.getByRole('heading',{name:'Your voice has been received'}).waitFor({timeout:60000});
+ await checked('Reviewed voice text creates a real ticket',async()=>{assert(await page.getByRole('link',{name:'Track your report'}).isVisible())});
+
  await page.goto(origin+'/console');
  await page.getByLabel('Coordinator password').fill(password);
  await page.getByRole('button',{name:'Enter console'}).click();

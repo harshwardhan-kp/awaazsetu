@@ -73,6 +73,12 @@ const translations = {
     language: "Report language",
     ticket: "Your voice has been received",
     tracking: "Track your report",
+    preview: "Transcribe and review",
+    reviewed: "I reviewed this transcript and corrected any errors.",
+    previewHint:
+      "Review the transcription before sending. You can edit every word.",
+    transcribing: "Transcribing…",
+
     privacy:
       "Your report is shared with the private coordination team. Your contact details are not displayed publicly.",
   },
@@ -96,6 +102,11 @@ const translations = {
     language: "रिपोर्ट की भाषा",
     ticket: "आपकी आवाज़ मिल गई है",
     tracking: "अपनी रिपोर्ट देखें",
+    preview: "लिप्यंतरण करें और जाँचें",
+    reviewed: "मैंने इस पाठ की जाँच की और गलतियाँ सुधारी हैं।",
+    previewHint: "भेजने से पहले पाठ जाँचें। आप हर शब्द बदल सकते हैं।",
+    transcribing: "लिप्यंतरण जारी है…",
+
     privacy:
       "आपकी रिपोर्ट केवल निजी समन्वय टीम से साझा की जाती है। संपर्क विवरण सार्वजनिक नहीं हैं।",
   },
@@ -119,6 +130,11 @@ const translations = {
     language: "अहवालाची भाषा",
     ticket: "तुमची माहिती मिळाली आहे",
     tracking: "तुमचा अहवाल पाहा",
+    preview: "आवाजाचा मजकूर करा आणि तपासा",
+    reviewed: "मी हा मजकूर तपासला आणि चुका दुरुस्त केल्या आहेत.",
+    previewHint: "पाठवण्यापूर्वी मजकूर तपासा. प्रत्येक शब्द बदलता येतो.",
+    transcribing: "मजकूर तयार होत आहे…",
+
     privacy:
       "तुमचा अहवाल फक्त खाजगी समन्वय टीमसोबत शेअर केला जातो. संपर्क माहिती सार्वजनिक दिसत नाही.",
   },
@@ -187,7 +203,12 @@ function Resident() {
     } | null>(null),
     [gpsBusy, setGpsBusy] = useState(false),
     [audio, setAudio] = useState<Blob | null>(null),
-    [recording, setRecording] = useState(false);
+    [recording, setRecording] = useState(false),
+    [transcribing, setTranscribing] = useState(false),
+    [hasTranscript, setHasTranscript] = useState(false),
+    [reviewed, setReviewed] = useState(false),
+    [audioUrl, setAudioUrl] = useState("");
+  const audioVersion = useRef(0);
   const recorder = useRef<MediaRecorder | null>(null),
     chunks = useRef<Blob[]>([]);
   useEffect(
@@ -196,8 +217,54 @@ function Resident() {
     },
     [],
   );
-  async function record() {
+  useEffect(() => {
+    if (!audio) {
+      setAudioUrl("");
+      return;
+    }
+    const url = URL.createObjectURL(audio);
+    setAudioUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [audio]);
+  function changeAudio(value: Blob | null) {
+    audioVersion.current += 1;
+    setAudio(value);
+    setHasTranscript(false);
+    setReviewed(false);
+    setText("");
     setError("");
+  }
+  async function transcribe() {
+    if (!audio || !consent) return;
+    const version = audioVersion.current;
+    setTranscribing(true);
+    setError("");
+    setHasTranscript(false);
+    setReviewed(false);
+    try {
+      const f = new FormData();
+      f.append(
+        "audio",
+        audio,
+        audio instanceof File
+          ? audio.name
+          : "voice." + (audio.type.includes("mp4") ? "m4a" : "webm"),
+      );
+      f.append("language", language);
+      f.append("consent", "true");
+      const r = await api("/transcriptions", { method: "POST", body: f });
+      if (version === audioVersion.current) {
+        setText(r.text);
+        setHasTranscript(true);
+      }
+    } catch (e) {
+      if (version === audioVersion.current) setError((e as Error).message);
+    } finally {
+      setTranscribing(false);
+    }
+  }
+  async function record() {
+    changeAudio(null);
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
         throw new Error(
@@ -209,7 +276,7 @@ function Resident() {
       chunks.current = [];
       r.ondataavailable = (e) => chunks.current.push(e.data);
       r.onstop = () => {
-        setAudio(new Blob(chunks.current, { type: r.mimeType }));
+        changeAudio(new Blob(chunks.current, { type: r.mimeType }));
         stream.getTracks().forEach((t) => t.stop());
         setRecording(false);
       };
@@ -244,42 +311,22 @@ function Resident() {
     setBusy(true);
     setError("");
     try {
-      let r;
-      if (audio) {
-        const f = new FormData();
-        f.append(
-          "audio",
-          audio,
-          audio instanceof File
-            ? audio.name
-            : "voice." +
-                (audio.type.includes("mp4")
-                  ? "m4a"
-                  : audio.type.includes("mpeg")
-                    ? "mp3"
-                    : "webm"),
-        );
-        f.append("language", language);
-        f.append("contact", contact);
-        f.append("consent", "true");
-        if (coords) {
-          f.append("latitude", String(coords.latitude));
-          f.append("longitude", String(coords.longitude));
-        }
-        r = await api("/reports/voice", { method: "POST", body: f });
-      } else
-        r = await api("/reports", {
-          method: "POST",
-          body: JSON.stringify({
-            text,
-            language,
-            channel: "web",
-            contact: contact || undefined,
-            consent,
-            ...coords,
-            idempotency_key: crypto.randomUUID(),
-          }),
-        });
+      if (text.length > 4000)
+        throw new Error("Please shorten the report to 4000 characters.");
+      if (audio && (!hasTranscript || !reviewed))
+        throw new Error(t.previewHint);
+      const r = await api("/reports", {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          language,
+          channel: audio ? "voice" : "web",
+          contact: contact || undefined,
+          consent,
+          ...coords,
+          idempotency_key: crypto.randomUUID(),
+        }),
+      });
       setResult(r);
     } catch (e) {
       setError((e as Error).message);
@@ -349,7 +396,7 @@ function Resident() {
                 onClick={() => {
                   setResult(null);
                   setText("");
-                  setAudio(null);
+                  changeAudio(null);
                   setConsent(false);
                 }}
               >
@@ -366,9 +413,15 @@ function Resident() {
                 {t.language}
                 <select
                   value={language}
-                  onChange={(e) =>
-                    setLanguage(e.target.value as keyof typeof translations)
-                  }
+                  onChange={(e) => {
+                    setLanguage(e.target.value as keyof typeof translations);
+                    if (audio) {
+                      audioVersion.current += 1;
+                      setHasTranscript(false);
+                      setReviewed(false);
+                      setText("");
+                    }
+                  }}
                 >
                   <option value="mr">मराठी · Marathi</option>
                   <option value="hi">हिन्दी · Hindi</option>
@@ -379,11 +432,14 @@ function Resident() {
                 {t.text}
                 <textarea
                   value={text}
-                  onChange={(e) => setText(e.target.value)}
+                  onChange={(e) => {
+                    setText(e.target.value);
+                    if (audio) setReviewed(false);
+                  }}
                   placeholder={t.placeholder}
                   rows={5}
-                  required={!audio}
-                  disabled={!!audio}
+                  required
+                  disabled={!!audio && !hasTranscript}
                   minLength={3}
                   maxLength={4000}
                 />
@@ -407,7 +463,7 @@ function Resident() {
                     <input
                       type="file"
                       accept="audio/*"
-                      onChange={(e) => setAudio(e.target.files?.[0] || null)}
+                      onChange={(e) => changeAudio(e.target.files?.[0] || null)}
                     />
                   </label>
                 </div>
@@ -417,12 +473,38 @@ function Resident() {
                     {(audio.size / 1024).toFixed(0)} KB{" "}
                     <button
                       type="button"
-                      onClick={() => setAudio(null)}
+                      onClick={() => changeAudio(null)}
                       aria-label="Remove audio"
                     >
                       <X size={15} />
                     </button>
                   </div>
+                )}
+                {audio && (
+                  <>
+                    <audio controls src={audioUrl} className="audio-preview" />
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={
+                        !consent || transcribing || recording || hasTranscript
+                      }
+                      onClick={transcribe}
+                    >
+                      {transcribing ? t.transcribing : t.preview}
+                    </button>
+                    <small>{t.previewHint}</small>
+                    {hasTranscript && (
+                      <label className="checkbox transcript-review">
+                        <input
+                          type="checkbox"
+                          checked={reviewed}
+                          onChange={(e) => setReviewed(e.target.checked)}
+                        />
+                        <span>{t.reviewed}</span>
+                      </label>
+                    )}
+                  </>
                 )}
                 <small>
                   Voice submission requires a configured transcription service.
@@ -466,7 +548,14 @@ function Resident() {
               </label>
               <ErrorBox text={error} />
               <button
-                disabled={busy || !consent || recording}
+                disabled={
+                  busy ||
+                  text.length > 4000 ||
+                  !consent ||
+                  recording ||
+                  transcribing ||
+                  (!!audio && (!hasTranscript || !reviewed))
+                }
                 className="button primary submit"
               >
                 {busy ? "Sending…" : t.submit}

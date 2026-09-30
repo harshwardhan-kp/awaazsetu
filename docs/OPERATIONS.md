@@ -25,7 +25,7 @@ SMS commands: `JOIN mr Ekta Nagar` (explicit consent to Marathi alerts for the a
 
 ## Telegram later
 
-Create a private bot through BotFather yourself. Set `TELEGRAM_BOT_TOKEN` and a random `TELEGRAM_WEBHOOK_SECRET` in private configuration. Run `scripts/setup_integrations.py telegram`. Private chats only; `/start` gives the drill/AI consent notice. Bot voice messages (OGG/Opus) convert with ffmpeg. No existing user account/session is accessed. Browser recordings/audio uploads already work without Telegram.
+Create a private bot through BotFather yourself. Set `TELEGRAM_BOT_TOKEN` and a random `TELEGRAM_WEBHOOK_SECRET` in private configuration. Run `scripts/setup_integrations.py telegram`. Private chats only; `/start` gives the drill/AI consent notice. Bot voice messages (OGG/Opus) convert with ffmpeg. No existing user account/session is accessed. Browser recordings/audio uploads already work without Telegram. Users transcribe, review/edit the text and confirm it before creating a ticket. Every audio format is decoded locally and rejected if longer than2minutes; no silent truncation.
 
 ## Deploy / backup
 
