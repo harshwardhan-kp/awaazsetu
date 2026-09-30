@@ -1,0 +1,13 @@
+{
+ "rewrites":[
+  {"source":"/api/:path*","destination":"https://awaazsetu-hkp-2026.azurewebsites.net/api/:path*"},
+  {"source":"/((?!api/|assets/).*)","destination":"/index.html"}
+ ],
+ "headers":[{"source":"/(.*)","headers":[
+  {"key":"X-Content-Type-Options","value":"nosniff"},
+  {"key":"Referrer-Policy","value":"no-referrer"},
+  {"key":"X-Frame-Options","value":"DENY"},
+  {"key":"Permissions-Policy","value":"camera=(), microphone=(self), geolocation=(self)"},
+  {"key":"Content-Security-Policy","value":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self' https://*.tile.openstreetmap.org; font-src 'self' data:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"}
+ ]}]
+}
