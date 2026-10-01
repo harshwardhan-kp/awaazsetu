@@ -46,3 +46,9 @@ The API key was supplied in chat; replace it in private `.env` and Azure setting
 ## PostgreSQL / PostGIS
 
 Use `DATABASE_URL=postgresql+psycopg://user:password@host/db`; deploy with one worker until database-level claims/locks replace process locks. First startup creates tables. Run `scripts/init_postgis.sql` after table creation if spatial indices are wanted. This version still calculates distances in Python. PostgreSQL is configurable but not live-tested in this run; the deployed path is persistent SQLite.
+
+## Map background tiles
+
+The dashboard uses Leaflet with the standard `https://tile.openstreetmap.org/{z}/{x}/{y}.png` endpoint and visible OSM attribution. Tile images explicitly use `referrerPolicy="strict-origin"`: OSM receives the site origin for identification, without report paths or tracking tokens. The rest of the site retains `no-referrer`. Do not strip this tile referrer, bypass browser caching, prefetch regions, or repeatedly pan automated browsers. UI contract tests mock tiles.
+
+OSM's community service is best-effort, without an SLA. A 403 background tile is a provider rejection, not lost incident data. For an operational deployment, configure a supported commercial map service; Google Maps requires its own integration, restricted API key and billing. Map-provider changes do not change stored incident coordinates or fix an uncertain report location.

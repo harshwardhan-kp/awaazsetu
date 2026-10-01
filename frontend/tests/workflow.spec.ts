@@ -34,6 +34,11 @@ const incident = {
   history: [],
 };
 test.beforeEach(async ({ page }) => {
+  // UI contract tests must not download tiles from the public OSM service.
+  await page.route(/^https:\/\/(?:[abc]\.)?tile\.openstreetmap\.org\//, route => route.fulfill({
+    contentType: "image/png",
+    body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64"),
+  }));
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     let json: any = {};
@@ -95,6 +100,19 @@ test.beforeEach(async ({ page }) => {
       body: JSON.stringify(json),
     });
   });
+});
+test("map identifies site origin without exposing the console URL", async ({ page }) => {
+  await page.route("**/console", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, headers: { ...response.headers(), "referrer-policy": "no-referrer" } });
+  });
+  const tileRequest = page.waitForRequest(r => new URL(r.url()).hostname === "tile.openstreetmap.org");
+  await page.goto("/console");
+  await page.getByLabel("Coordinator password").fill("not-a-real-password");
+  await page.getByRole("button", { name: "Enter console" }).click();
+  const request = await tileRequest;
+  expect((await request.allHeaders()).referer).toBe("http://127.0.0.1:5173/");
+  await expect(page.locator(".leaflet-tile").first()).toHaveAttribute("referrerpolicy", "strict-origin");
 });
 test("resident language, report receipt and private tracking", async ({
   page,
