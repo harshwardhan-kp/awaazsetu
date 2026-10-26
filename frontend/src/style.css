@@ -1748,3 +1748,55 @@ td .badge {
   margin-top: 14px;
   margin-bottom: 0;
 }
+.field {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 19px;
+}
+.location-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.location-row .icon-button {
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+.char-count {
+  display: block;
+  margin: -14px 0 14px;
+  font-size: 11px;
+  text-align: right;
+  font-weight: 400;
+  color: var(--muted);
+}
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.note-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: -8px 0 14px;
+}
+.button.small {
+  padding: 7px 12px;
+  font-size: 12px;
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
