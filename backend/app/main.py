@@ -261,7 +261,9 @@ def tracking_json(db, r):
         "acknowledgement": acknowledgement(r.ticket_id, r.language),
         "updates": updates,
         "needs_clarification": i.needs_clarification,
-        "clarification_prompt": CLARIFY[r.language] if i.needs_clarification else None,
+        "clarification_prompt": (
+            CLARIFY.get(r.language, CLARIFY["en"]) if i.needs_clarification else None
+        ),
     }
 
 
@@ -353,7 +355,8 @@ def get_incident(id: str, db: Session = Depends(get_db)):
 @app.patch("/api/incidents/{id}", dependencies=[Depends(admin)])
 def update_incident(id: str, payload: UpdateIn, db: Session = Depends(get_db)):
     i = find_incident(db, id)
-    if payload.status:
+    changed = bool(payload.status) and payload.status != i.status
+    if changed:
         i.status = payload.status
     i.updated_at = now()
     db.add(
@@ -361,8 +364,10 @@ def update_incident(id: str, payload: UpdateIn, db: Session = Depends(get_db)):
             incident_id=id, status=i.status, notes=payload.notes, actor="coordinator"
         )
     )
-    for r in db.scalars(select(Report).where(Report.incident_id == id)):
-        queue(db, r, status_message(r.ticket_id, i.status, r.language))
+    # Coordinator notes are private; only notify reporters when the status moves.
+    if changed:
+        for r in db.scalars(select(Report).where(Report.incident_id == id)):
+            queue(db, r, status_message(r.ticket_id, i.status, r.language))
     db.commit()
     return incident_json(db, i, True)
 
@@ -439,19 +444,21 @@ async def retry(db: Session = Depends(get_db)):
 
 @app.post("/api/alerts", dependencies=[Depends(admin)])
 def alert(payload: AlertIn, db: Session = Depends(get_db)):
+    # Use only matching-language alerts rather than pretending an arbitrary message was translated.
+    if not payload.language:
+        raise HTTPException(422, "Choose the language the alert is written in")
     a = Alert(ward=payload.ward, message=payload.message)
     db.add(a)
     db.flush()
     contacts = db.scalars(
-        select(Contact).where(Contact.opted_in == True, Contact.ward == payload.ward)
+        select(Contact).where(
+            Contact.opted_in == True,
+            Contact.ward == payload.ward,
+            Contact.language == payload.language,
+        )
     ).all()
     count = 0
     for c in contacts:
-        if payload.language and c.language != payload.language:
-            continue
-        # Use only matching-language alerts rather than pretending an arbitrary message was translated.
-        if not payload.language:
-            continue
         db.add(
             Outbox(
                 contact_id=c.id,

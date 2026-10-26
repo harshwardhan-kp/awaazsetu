@@ -287,3 +287,41 @@ test("voice provider errors stay visible; replacement audio clears review", asyn
     page.getByRole("button", { name: "Send report", exact: true }),
   ).toBeDisabled();
 });
+
+test("coordinator saves a note without changing status and clears filters", async ({
+  page,
+}) => {
+  await page.goto("/console");
+  await page.getByLabel("Coordinator password").fill("not-a-real-password");
+  await page.getByRole("button", { name: "Enter console" }).click();
+  await page.getByLabel("Filter status").selectOption("resolved");
+  await page.getByRole("button", { name: "Clear filters" }).first().click();
+  await expect(page.getByLabel("Filter status")).toHaveValue("");
+  await page.getByRole("button", { name: incident.summary }).click();
+  await expect(
+    page.getByRole("button", { name: "Save note only" }),
+  ).toBeDisabled();
+  await page.getByLabel("Notes", { exact: true }).fill("Called the reporter");
+  const patch = page.waitForRequest(
+    (r) =>
+      r.url().endsWith("/api/incidents/inc-1") && r.method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Save note only" }).click();
+  expect((await patch).postDataJSON()).toEqual({ notes: "Called the reporter" });
+});
+
+test("report confirmation offers a copyable tracking link", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("अहवालाची भाषा").selectOption("en");
+  await page
+    .getByLabel("Describe the situation")
+    .fill("Knee deep water on the road near Test landmark");
+  await page.getByLabel("I agree to share").check();
+  await page.getByRole("button", { name: "Send report", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Copy tracking link" }),
+  ).toBeVisible();
+  await page.reload();
+  // The chosen language is remembered for the next visit.
+  await expect(page.getByLabel("Report language")).toHaveValue("en");
+});

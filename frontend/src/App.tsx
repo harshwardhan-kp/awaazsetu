@@ -33,6 +33,7 @@ import {
   Languages,
   Navigation,
   StopCircle,
+  Copy,
 } from "lucide-react";
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import {
@@ -52,6 +53,19 @@ const date = (d: string) =>
     minute: "2-digit",
   });
 const nice = (s: string) => s?.replaceAll("_", " ") || "Unknown";
+// crypto.randomUUID is only available in secure contexts (HTTPS or localhost).
+const newKey = () =>
+  globalThis.crypto?.randomUUID?.() ??
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+const LANGUAGE_KEY = "awaazsetu_language";
+const MAX_RECORDING_SECONDS = 120;
+function storedLanguage(): "en" | "hi" | "mr" {
+  try {
+    const value = localStorage.getItem(LANGUAGE_KEY);
+    if (value === "en" || value === "hi" || value === "mr") return value;
+  } catch {}
+  return "mr";
+}
 const translations = {
   en: {
     title: "A voice that reaches. A community that responds.",
@@ -78,6 +92,17 @@ const translations = {
     previewHint:
       "Review the transcription before sending. You can edit every word.",
     transcribing: "Transcribing…",
+    stop: "Stop recording",
+    findingLocation: "Finding location…",
+    gpsDenied:
+      "Location permission was denied. Mention a nearby landmark in your report instead.",
+    gpsFailed:
+      "Could not find your location. Mention a nearby landmark in your report instead.",
+    clearLocation: "Remove location",
+    copyLink: "Copy tracking link",
+    copied: "Link copied",
+    another: "Submit another report",
+    sending: "Sending…",
 
     privacy:
       "Your report is shared with the private coordination team. Your contact details are not displayed publicly.",
@@ -106,6 +131,16 @@ const translations = {
     reviewed: "मैंने इस पाठ की जाँच की और गलतियाँ सुधारी हैं।",
     previewHint: "भेजने से पहले पाठ जाँचें। आप हर शब्द बदल सकते हैं।",
     transcribing: "लिप्यंतरण जारी है…",
+    stop: "रिकॉर्डिंग रोकें",
+    findingLocation: "स्थान खोजा जा रहा है…",
+    gpsDenied:
+      "स्थान की अनुमति नहीं मिली। कृपया रिपोर्ट में पास का स्थान लिखें।",
+    gpsFailed: "आपका स्थान नहीं मिला। कृपया रिपोर्ट में पास का स्थान लिखें।",
+    clearLocation: "स्थान हटाएं",
+    copyLink: "ट्रैकिंग लिंक कॉपी करें",
+    copied: "लिंक कॉपी हो गया",
+    another: "एक और रिपोर्ट भेजें",
+    sending: "भेजा जा रहा है…",
 
     privacy:
       "आपकी रिपोर्ट केवल निजी समन्वय टीम से साझा की जाती है। संपर्क विवरण सार्वजनिक नहीं हैं।",
@@ -134,6 +169,15 @@ const translations = {
     reviewed: "मी हा मजकूर तपासला आणि चुका दुरुस्त केल्या आहेत.",
     previewHint: "पाठवण्यापूर्वी मजकूर तपासा. प्रत्येक शब्द बदलता येतो.",
     transcribing: "मजकूर तयार होत आहे…",
+    stop: "रेकॉर्डिंग थांबवा",
+    findingLocation: "ठिकाण शोधत आहे…",
+    gpsDenied: "ठिकाणाची परवानगी मिळाली नाही. अहवालात जवळची खूण लिहा.",
+    gpsFailed: "तुमचे ठिकाण सापडले नाही. अहवालात जवळची खूण लिहा.",
+    clearLocation: "ठिकाण काढा",
+    copyLink: "ट्रॅकिंग लिंक कॉपी करा",
+    copied: "लिंक कॉपी झाली",
+    another: "आणखी एक अहवाल पाठवा",
+    sending: "पाठवत आहे…",
 
     privacy:
       "तुमचा अहवाल फक्त खाजगी समन्वय टीमसोबत शेअर केला जातो. संपर्क माहिती सार्वजनिक दिसत नाही.",
@@ -189,7 +233,8 @@ function PublicHeader() {
   );
 }
 function Resident() {
-  const [language, setLanguage] = useState<keyof typeof translations>("mr");
+  const [language, setLanguage] =
+    useState<keyof typeof translations>(storedLanguage);
   const t = translations[language];
   const [text, setText] = useState(""),
     [contact, setContact] = useState(""),
@@ -207,8 +252,26 @@ function Resident() {
     [transcribing, setTranscribing] = useState(false),
     [hasTranscript, setHasTranscript] = useState(false),
     [reviewed, setReviewed] = useState(false),
-    [audioUrl, setAudioUrl] = useState("");
+    [audioUrl, setAudioUrl] = useState(""),
+    [seconds, setSeconds] = useState(0),
+    [copied, setCopied] = useState(false);
   const audioVersion = useRef(0);
+  // One key per draft, so retrying after a lost response cannot create a duplicate report.
+  const draftKey = useRef(newKey());
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANGUAGE_KEY, language);
+    } catch {}
+  }, [language]);
+  useEffect(() => {
+    if (!recording) return;
+    setSeconds(0);
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [recording]);
+  useEffect(() => {
+    if (recording && seconds >= MAX_RECORDING_SECONDS) recorder.current?.stop();
+  }, [recording, seconds]);
   const recorder = useRef<MediaRecorder | null>(null),
     chunks = useRef<Blob[]>([]);
   useEffect(
@@ -299,12 +362,14 @@ function Resident() {
             setGpsBusy(false);
           },
           (e) => {
-            setError(e.message);
+            setError(
+              e.code === e.PERMISSION_DENIED ? t.gpsDenied : t.gpsFailed,
+            );
             setGpsBusy(false);
           },
-          { timeout: 15000 },
+          { timeout: 15000, enableHighAccuracy: true },
         )
-      : (setError("Location unavailable."), setGpsBusy(false));
+      : (setError(t.gpsFailed), setGpsBusy(false));
   }
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -324,14 +389,36 @@ function Resident() {
           contact: contact || undefined,
           consent,
           ...coords,
-          idempotency_key: crypto.randomUUID(),
+          idempotency_key: draftKey.current,
         }),
       });
       setResult(r);
     } catch (e) {
+      // A rejected request saved nothing, so the next attempt gets a fresh key.
+      // Network failures keep the key: the report may have been stored already.
+      if (!(e instanceof TypeError)) draftKey.current = newKey();
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+  function startOver() {
+    draftKey.current = newKey();
+    setResult(null);
+    setText("");
+    changeAudio(null);
+    setConsent(false);
+    setCoords(null);
+    setCopied(false);
+    window.scrollTo({ top: 0 });
+  }
+  async function copyLink() {
+    const url = `${window.location.origin}/track/${result.ticket_id}?token=${encodeURIComponent(result.tracking_token)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      window.prompt(t.copyLink, url);
     }
   }
   return (
@@ -375,32 +462,36 @@ function Resident() {
               </div>
               <span className="eyebrow">REPORT RECEIVED</span>
               <h2>{t.ticket}</h2>
-              <p>{result.acknowledgement}</p>
+              <p>
+                {result.duplicate
+                  ? "This report had already reached us before the connection dropped. Use the tracking link from your first submission, if you saved it."
+                  : result.acknowledgement}
+              </p>
               <div className="ticket-box">
                 <small>TICKET ID</small>
                 <strong>{result.ticket_id}</strong>
               </div>
-              <Link
-                className="button primary"
-                to={`/track/${result.ticket_id}?token=${encodeURIComponent(result.tracking_token)}`}
-              >
-                {t.tracking}
-                <ArrowRight size={18} />
-              </Link>
-              <p className="muted">
-                Save this private tracking link to see updates. Receiving a
-                ticket does not guarantee a response.
-              </p>
-              <button
-                className="button ghost"
-                onClick={() => {
-                  setResult(null);
-                  setText("");
-                  changeAudio(null);
-                  setConsent(false);
-                }}
-              >
-                Submit another report
+              {result.tracking_token && (
+                <>
+                  <Link
+                    className="button primary"
+                    to={`/track/${result.ticket_id}?token=${encodeURIComponent(result.tracking_token)}`}
+                  >
+                    {t.tracking}
+                    <ArrowRight size={18} />
+                  </Link>
+                  <button className="button secondary" onClick={copyLink}>
+                    {copied ? <Check size={17} /> : <Copy size={17} />}
+                    {copied ? t.copied : t.copyLink}
+                  </button>
+                  <p className="muted">
+                    Save this private tracking link to see updates. Receiving a
+                    ticket does not guarantee a response.
+                  </p>
+                </>
+              )}
+              <button className="button ghost" onClick={startOver}>
+                {t.another}
               </button>
             </div>
           ) : (
@@ -444,6 +535,11 @@ function Resident() {
                   maxLength={4000}
                 />
               </label>
+              {text.length > 3600 && (
+                <small className="char-count" aria-live="polite">
+                  {text.length} / 4000
+                </small>
+              )}
               <div className="voice-box">
                 <span>{t.voice}</span>
                 <div className="button-row">
@@ -455,7 +551,9 @@ function Resident() {
                     }
                   >
                     {recording ? <StopCircle size={17} /> : <Mic size={17} />}{" "}
-                    {recording ? "Stop recording" : t.record}
+                    {recording
+                      ? `${t.stop} · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} / 2:00`
+                      : t.record}
                   </button>
                   <label className="button ghost upload">
                     <Upload size={17} />
@@ -510,22 +608,35 @@ function Resident() {
                   Voice submission requires a configured transcription service.
                 </small>
               </div>
-              <label>
-                {t.location}
-                <button
-                  type="button"
-                  onClick={gps}
-                  disabled={gpsBusy}
-                  className="location-button"
-                >
-                  <Navigation size={17} />
-                  {gpsBusy
-                    ? "Finding location…"
-                    : coords
-                      ? `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)} ✓`
-                      : t.gps}
-                </button>
-              </label>
+              <div className="field">
+                <span>{t.location}</span>
+                <div className="location-row">
+                  <button
+                    type="button"
+                    onClick={gps}
+                    disabled={gpsBusy}
+                    className="location-button"
+                  >
+                    <Navigation size={17} />
+                    {gpsBusy
+                      ? t.findingLocation
+                      : coords
+                        ? `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)} ✓`
+                        : t.gps}
+                  </button>
+                  {coords && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={t.clearLocation}
+                      title={t.clearLocation}
+                      onClick={() => setCoords(null)}
+                    >
+                      <X size={17} />
+                    </button>
+                  )}
+                </div>
+              </div>
               <label>
                 {t.contact}
                 <input
@@ -558,7 +669,7 @@ function Resident() {
                 }
                 className="button primary submit"
               >
-                {busy ? "Sending…" : t.submit}
+                {busy ? t.sending : t.submit}
                 <ArrowRight size={19} />
               </button>
               <div className="form-note">
@@ -582,18 +693,32 @@ function Track() {
   const [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
     [text, setText] = useState(""),
-    [busy, setBusy] = useState(false);
-  const load = () =>
-    api(`/track/${ticket_id}?token=${encodeURIComponent(token)}`)
-      .then(setData)
-      .catch((e) => setError(e.message));
+    [busy, setBusy] = useState(false),
+    [refreshing, setRefreshing] = useState(false),
+    [notice, setNotice] = useState("");
+  const load = () => {
+    setRefreshing(true);
+    return api(`/track/${ticket_id}?token=${encodeURIComponent(token)}`)
+      .then((d) => {
+        setData(d);
+        setError("");
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setRefreshing(false));
+  };
   useEffect(() => {
     load();
+    // Keep the ticket current while the page is open and visible.
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 60000);
+    return () => clearInterval(timer);
   }, [ticket_id, token]);
   async function clarify(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       setData(
         await api(`/track/${ticket_id}/clarify`, {
@@ -602,6 +727,7 @@ function Track() {
         }),
       );
       setText("");
+      setNotice("Thank you. The location was added to your report.");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -618,6 +744,11 @@ function Track() {
         <span className="eyebrow">YOUR PRIVATE REPORT</span>
         <h1>Follow your ticket.</h1>
         <ErrorBox text={error} />
+        {notice && (
+          <div className="success-note" role="status">
+            {notice}
+          </div>
+        )}
         {data ? (
           <>
             <div className="card">
@@ -648,7 +779,7 @@ function Track() {
                   />
                 </label>
                 <button className="button primary" disabled={busy}>
-                  Send clarification
+                  {busy ? "Sending…" : "Send clarification"}
                 </button>
               </form>
             )}
@@ -659,8 +790,9 @@ function Track() {
                   className="icon-button"
                   aria-label="Refresh updates"
                   onClick={load}
+                  disabled={refreshing}
                 >
-                  <RefreshCw size={18} />
+                  <RefreshCw size={18} className={refreshing ? "spin" : ""} />
                 </button>
               </div>
               {data.updates?.length ? (
@@ -686,13 +818,22 @@ function Track() {
     </>
   );
 }
-function Login({ onLogin }: { onLogin: () => void }) {
+function Login({
+  onLogin,
+  expired = false,
+}: {
+  onLogin: () => void;
+  expired?: boolean;
+}) {
   const [password, setPassword] = useState(""),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(
+      expired ? "Your session expired. Please sign in again." : "",
+    );
   async function login(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
+    setError("");
     try {
       const r = await api("/auth/login", {
         method: "POST",
@@ -744,12 +885,25 @@ function Console() {
   const [authed, setAuthed] = useState(
     !!sessionStorage.getItem("awaazsetu_token"),
   );
+  const [expired, setExpired] = useState(false);
   useEffect(() => {
-    const f = () => setAuthed(false);
+    const f = () => {
+      setAuthed(false);
+      setExpired(true);
+    };
     window.addEventListener("auth-expired", f);
     return () => window.removeEventListener("auth-expired", f);
   }, []);
-  if (!authed) return <Login onLogin={() => setAuthed(true)} />;
+  if (!authed)
+    return (
+      <Login
+        expired={expired}
+        onLogin={() => {
+          setAuthed(true);
+          setExpired(false);
+        }}
+      />
+    );
   return (
     <div className="console">
       <aside className="sidebar">
@@ -856,7 +1010,11 @@ function Overview() {
     setLoading(true);
     setError("");
     try {
-      const p = new URLSearchParams({ q, status, band, language, channel });
+      const p = new URLSearchParams(
+        Object.entries({ q, status, band, language, channel }).filter(
+          ([, v]) => v,
+        ),
+      );
       const r = await api(`/incidents?${p}`);
       setItems(r.items);
       setUpdated(
@@ -873,8 +1031,23 @@ function Overview() {
   }
   useEffect(() => {
     const t = setTimeout(load, 250);
-    return () => clearTimeout(t);
+    // Poll so new reports appear without a manual refresh; skip hidden tabs.
+    const poll = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 30000);
+    return () => {
+      clearTimeout(t);
+      clearInterval(poll);
+    };
   }, [q, status, band, language, channel]);
+  const filtered = !!(q || status || band || language || channel);
+  function clearFilters() {
+    setQ("");
+    setStatus("");
+    setBand("");
+    setLanguage("");
+    setChannel("");
+  }
   async function open(id: string) {
     try {
       setSelected(await api(`/incidents/${id}`));
@@ -890,7 +1063,7 @@ function Overview() {
         description="Review incoming voices, confirm the situation, and coordinate the next step."
       >
         <button className="button secondary" onClick={load} disabled={loading}>
-          <RefreshCw size={16} />
+          <RefreshCw size={16} className={loading ? "spin" : ""} />
           Refresh
         </button>
       </PageHead>
@@ -1067,8 +1240,14 @@ function Overview() {
               <option key={s}>{s}</option>
             ))}
           </select>
+          {filtered && (
+            <button className="button ghost small" onClick={clearFilters}>
+              <X size={15} />
+              Clear filters
+            </button>
+          )}
         </div>
-        {loading ? (
+        {loading && !items.length ? (
           <div className="empty">Loading reports…</div>
         ) : items.length ? (
           <div className="table-scroll">
@@ -1142,9 +1321,15 @@ function Overview() {
             <MessageSquare size={30} />
             <h3>No incidents in this view</h3>
             <p>
-              New resident reports will appear here. Adjust filters or submit a
-              report to get started.
+              {filtered
+                ? "No incidents match these filters."
+                : "New resident reports will appear here. Submit a report or load drill examples to get started."}
             </p>
+            {filtered && (
+              <button className="button secondary small" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
           </div>
         )}
       </section>
@@ -1229,14 +1414,22 @@ function Detail({
       previous?.focus();
     };
   }, []);
-  async function status(s: string) {
+  const closed = i.status === "resolved" || i.status === "dismissed";
+  async function status(s: string | null) {
+    if (
+      s === "dismissed" &&
+      !window.confirm(
+        `Dismiss ${i.ticket_id}? Reporters will be told it was closed after review.`,
+      )
+    )
+      return;
     setBusy(true);
     setError("");
     try {
       onChange(
         await api(`/incidents/${i.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ status: s, notes }),
+          body: JSON.stringify(s ? { status: s, notes } : { notes }),
         }),
       );
       setNotes("");
@@ -1247,6 +1440,13 @@ function Detail({
     }
   }
   async function merge() {
+    const other = items.find((a) => a.id === source);
+    if (
+      !window.confirm(
+        `Merge ${other?.ticket_id ?? "the selected incident"} into ${i.ticket_id}? The other incident will be removed and its reports moved here.`,
+      )
+    )
+      return;
     setBusy(true);
     setError("");
     try {
@@ -1257,6 +1457,7 @@ function Detail({
         }),
       );
       setSource("");
+      setNotes("");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1283,9 +1484,12 @@ function Detail({
             <X />
           </button>
         </div>
-        <span className={`badge band-${i.severity_band}`}>
-          {i.severity_band} priority · {i.severity_score}/100
-        </span>
+        <div className="status-line">
+          <span className={`badge status-${i.status}`}>{nice(i.status)}</span>
+          <span className={`badge band-${i.severity_band}`}>
+            {i.severity_band} priority · {i.severity_score}/100
+          </span>
+        </div>
         <h2>{i.summary}</h2>
         <div className="detail-meta">
           <MapPin size={17} />
@@ -1325,6 +1529,15 @@ function Detail({
             placeholder="Record what you verified or the next action…"
           />
         </label>
+        <div className="note-actions">
+          <button
+            className="button ghost small"
+            disabled={busy || !notes.trim()}
+            onClick={() => status(null)}
+          >
+            Save note only
+          </button>
+        </div>
         <div className="action-grid">
           {["verified", "responding", "resolved", "dismissed"].map((s) => (
             <button
@@ -1371,9 +1584,16 @@ function Detail({
           confirm both reports describe the same incident. Source reports are
           kept. Add a review note explaining the merge before proceeding.
         </p>
+        {closed && (
+          <p className="warning">
+            This incident is closed. Reopen it as verified or responding before
+            merging.
+          </p>
+        )}
         <select
           aria-label="Select duplicate to merge"
           value={source}
+          disabled={closed}
           onChange={(e) => setSource(e.target.value)}
         >
           <option value="">Select a source incident…</option>
@@ -1386,12 +1606,17 @@ function Detail({
             ))}
         </select>
         <button
-          disabled={!source || busy || notes.trim().length < 5}
+          disabled={closed || !source || busy || notes.trim().length < 5}
           className="button secondary"
           onClick={merge}
         >
           Merge into this incident
         </button>
+        {source && notes.trim().length < 5 && (
+          <small className="muted">
+            Add a note of at least 5 characters above to explain the merge.
+          </small>
+        )}
         <hr />
         <h3>Activity</h3>
         {i.history?.map((h, n) => (
@@ -1522,13 +1747,24 @@ function Notifications() {
     [ward, setWard] = useState(""),
     [language, setLanguage] = useState("mr"),
     [busy, setBusy] = useState(false),
-    [notice, setNotice] = useState("");
+    [notice, setNotice] = useState(""),
+    [wards, setWards] = useState<string[]>([]);
   const load = () =>
     api("/outbox")
       .then(setData)
       .catch((e) => setError(e.message));
   useEffect(() => {
     load();
+    // Suggest known ward names; alerts only reach contacts whose ward matches exactly.
+    api("/coverage")
+      .then((c) =>
+        setWards(
+          (c.wards || [])
+            .map((w: any) => w.ward)
+            .filter((w: string) => w && w !== "Unlocated"),
+        ),
+      )
+      .catch(() => {});
   }, []);
   async function retry() {
     setBusy(true);
@@ -1536,7 +1772,8 @@ function Notifications() {
     try {
       const r = await api("/outbox/retry", { method: "POST" });
       setNotice(
-        `Processed ${r.processed}; sent ${r.sent}; failed ${r.failed}.`,
+        r.note ??
+          `Processed ${r.processed}; sent ${r.sent}; failed ${r.failed}.`,
       );
       load();
     } catch (e) {
@@ -1554,7 +1791,12 @@ function Notifications() {
         method: "POST",
         body: JSON.stringify({ ward, language, message }),
       });
-      setNotice(`Alert queued for ${r.queued} opted-in recipients.`);
+      setNotice(
+        `Alert queued for ${r.queued} opted-in recipients.` +
+          (r.queued
+            ? ""
+            : " Recipients must have joined alerts for this exact ward and language."),
+      );
       setMessage("");
       load();
     } catch (e) {
@@ -1587,7 +1829,7 @@ function Notifications() {
               disabled={busy}
               onClick={retry}
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={16} className={busy ? "spin" : ""} />
               Retry pending
             </button>
           </div>
@@ -1604,7 +1846,7 @@ function Notifications() {
                       {m.channel} · {m.language?.toUpperCase()}
                     </span>
                     <span className={`badge status-${m.status}`}>
-                      {m.status}
+                      {nice(m.status)}
                     </span>
                   </div>
                   <p>{m.message}</p>
@@ -1634,9 +1876,15 @@ function Notifications() {
               required
               maxLength={100}
               value={ward}
+              list="known-wards"
               onChange={(e) => setWard(e.target.value)}
-              placeholder="Enter exact ward name"
+              placeholder="Start typing to pick a known ward"
             />
+            <datalist id="known-wards">
+              {wards.map((w) => (
+                <option key={w} value={w} />
+              ))}
+            </datalist>
           </label>
           <label>
             Language
@@ -1661,9 +1909,10 @@ function Notifications() {
               placeholder="Write a clear, verified update…"
             />
           </label>
+          <small className="char-count">{message.length} / 1000</small>
           <button className="button primary submit" disabled={busy}>
             <Send size={16} />
-            Queue alert
+            {busy ? "Queuing…" : "Queue alert"}
           </button>
         </form>
       </div>
@@ -1708,7 +1957,8 @@ function System() {
       a.href = u;
       a.download = "awaazsetu-reports.csv";
       a.click();
-      URL.revokeObjectURL(u);
+      // Revoking synchronously can cancel the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(u), 1000);
     } catch (e) {
       setError((e as Error).message);
     }

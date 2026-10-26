@@ -415,3 +415,42 @@ def test_cross_language_merge_compares_english_summaries(client, monkeypatch):
     assert a["incident"]["id"] == b["incident"]["id"]
     assert inputs and all(x.startswith("An elderly person") for x in inputs[0])
     assert b["report"]["text"] == "एकता नगरमध्ये आजी अडकल्या आहेत."
+
+
+def test_note_only_update_does_not_notify_reporters(client, headers):
+    data = report(client, contact="+919876543210").json()
+    id = data["incident"]["id"]
+    assert (
+        client.patch(
+            "/api/incidents/" + id, headers=headers, json={"notes": "Private note"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            "/api/incidents/" + id,
+            headers=headers,
+            json={"status": "new", "notes": "Still new"},
+        ).status_code
+        == 200
+    )
+    with SessionLocal() as db:
+        assert len(db.scalars(select(Outbox)).all()) == 1
+
+
+def test_alert_requires_language(client, headers):
+    r = client.post(
+        "/api/alerts",
+        headers=headers,
+        json={"ward": "Pilot area: Ekta Nagar", "message": "सराव सूचना"},
+    )
+    assert r.status_code == 422
+
+
+def test_unreadable_sms_is_acknowledged_without_retry(client):
+    r = sms(client, "ok", "too-short")
+    assert r.status_code == 200 and r.json()["rejected"]
+    assert sms(client, "ok", "too-short").json()["duplicate"]
+    with SessionLocal() as db:
+        item = db.scalar(select(Outbox))
+        assert item.channel == "sms" and item.message.startswith("Could not read")
