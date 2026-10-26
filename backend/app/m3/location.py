@@ -38,6 +38,23 @@ def _load():
         return json.load(handle)
 
 
+_alias_cache = (None, [])
+
+
+def _aliases(rows):
+    """Normalized names per gazetteer row, recomputed only when the rows change."""
+    global _alias_cache
+    if _alias_cache[0] is not rows:
+        _alias_cache = (
+            rows,
+            [
+                [normalize(a) for a in [row["name"], *row.get("aliases", [])]]
+                for row in rows
+            ],
+        )
+    return _alias_cache[1]
+
+
 def get_gazetteer():
     """Return independent records so callers cannot alter cached resolution data."""
     return [dict(r, aliases=list(r.get("aliases", []))) for r in _load()]
@@ -142,8 +159,7 @@ def resolve_location(
     if not query:
         return _unknown()
     matches = []
-    for row in rows:
-        aliases = [normalize(a) for a in [row["name"], *row.get("aliases", [])]]
+    for row, aliases in zip(rows, _aliases(rows)):
         exact = [a for a in aliases if len(a) >= 4 and _contains(query, a)]
         if exact:
             matches.append((row, 0.92, max(len(a) for a in exact), "gazetteer_exact"))
@@ -152,8 +168,7 @@ def resolve_location(
         longest = max(m[2] for m in matches)
         matches = [m for m in matches if m[2] == longest]
     elif len(query) <= 120:
-        for row in rows:
-            aliases = [normalize(a) for a in [row["name"], *row.get("aliases", [])]]
+        for row, aliases in zip(rows, _aliases(rows)):
             best = 0.0
             for alias in aliases:
                 if len(alias) < 6:

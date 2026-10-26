@@ -64,3 +64,47 @@ def test_transactional_delivery_and_concurrent_retry_are_safe(client, monkeypatc
     with SessionLocal() as db:
         assert db.get(Outbox, "transactional-reply").status == "gateway_accepted"
         assert db.get(Outbox, "unsubscribed-alert").status == "cancelled"
+
+
+def test_unconfigured_channel_backlog_does_not_starve_delivery(client, monkeypatch):
+    monkeypatch.setattr(settings, "delivery_enabled", True)
+    monkeypatch.setattr(settings, "sms_gateway_url", "")
+    monkeypatch.setattr(settings, "telegram_bot_token", "test-token")
+    with SessionLocal() as db:
+        db.add(
+            Contact(
+                id="sms-c", encrypted_address=encrypt("+919876543210"), channel="sms"
+            )
+        )
+        db.add(
+            Contact(id="tg-c", encrypted_address=encrypt("12345"), channel="telegram")
+        )
+        db.flush()
+        for n in range(5):
+            db.add(
+                Outbox(
+                    contact_id="sms-c", channel="sms", language="en", message=f"s{n}"
+                )
+            )
+        db.add(
+            Outbox(
+                id="tg-msg",
+                contact_id="tg-c",
+                channel="telegram",
+                language="en",
+                message="t",
+            )
+        )
+        db.commit()
+
+    async def post(self, url, **kwargs):
+        return httpx.Response(
+            200, json={"ok": True}, request=httpx.Request("POST", url)
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    with SessionLocal() as db:
+        result = asyncio.run(deliver(db, limit=2))
+    assert result["sent"] == 1
+    with SessionLocal() as db:
+        assert db.get(Outbox, "tg-msg").status == "sent"

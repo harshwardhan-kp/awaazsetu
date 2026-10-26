@@ -18,6 +18,32 @@ from .voice import transcribe
 
 router = APIRouter(prefix="/api/webhooks")
 
+UNREADABLE = "Could not read this report. Please send a short text describing the flooding and a nearby landmark."
+VOICE_UNAVAILABLE = (
+    "Voice notes cannot be processed right now. Please send your report as text."
+)
+
+
+def reply(db, sender, channel, key, message):
+    """Answer an unprocessable message with 200 so gateways do not retry it forever."""
+    from ..service import address
+
+    existing = db.get(Contact, contact_hash(channel, address(channel, sender)))
+    c = existing or save_contact(db, channel, sender, "en")
+    db.flush()
+    db.add(
+        Outbox(
+            contact_id=c.id,
+            channel=channel,
+            language=c.language,
+            message=message,
+            status="queued",
+        )
+    )
+    db.add(IntakeKey(id=key))
+    db.commit()
+    return {"ok": True, "rejected": True}
+
 
 async def command(db, text, sender, channel, key):
     parts = text.strip().split(maxsplit=1)
@@ -193,7 +219,7 @@ async def _sms(request, db):
             text=text, channel="sms", contact=sender, consent=True, idempotency_key=key
         )
     except ValidationError:
-        raise HTTPException(422, "Invalid SMS report")
+        return reply(db, sender, "sms", key, UNREADABLE)
     result = await intake(db, payload)
     db.add(IntakeKey(id=key))
     db.commit()
@@ -238,15 +264,21 @@ async def _telegram(request, db):
         if result:
             return result
     elif message.get("voice"):
-        if not budget(db):
-            raise HTTPException(503, "Daily voice usage limit reached")
-        db.commit()
         voice = message["voice"]
         if (
             voice.get("file_size", 0) > settings.voice_max_bytes
             or voice.get("duration", 0) > 120
         ):
-            raise HTTPException(413, "Voice note too long; maximum 2 minutes / 10 MB")
+            return reply(
+                db,
+                sender,
+                "telegram",
+                key,
+                "Voice note too long; maximum 2 minutes. Please send a shorter note or text.",
+            )
+        if not budget(db):
+            return reply(db, sender, "telegram", key, VOICE_UNAVAILABLE)
+        db.commit()
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 meta = await client.get(
@@ -262,12 +294,19 @@ async def _telegram(request, db):
                 )
                 data.raise_for_status()
             if len(data.content) > settings.voice_max_bytes:
-                raise HTTPException(413, "Voice note too large")
+                return reply(db, sender, "telegram", key, VOICE_UNAVAILABLE)
             text = await transcribe(data.content, "voice.ogg")
-        except HTTPException:
-            raise
+        except HTTPException as error:
+            # Speech failures are surfaced to the reporter; retries would repeat them.
+            return reply(
+                db,
+                sender,
+                "telegram",
+                key,
+                error.detail if error.status_code == 422 else VOICE_UNAVAILABLE,
+            )
         except Exception:
-            raise HTTPException(503, "Unable to retrieve voice note")
+            return reply(db, sender, "telegram", key, VOICE_UNAVAILABLE)
     else:
         return {"ok": True, "ignored": True}
     try:
@@ -279,7 +318,7 @@ async def _telegram(request, db):
             idempotency_key=key,
         )
     except ValidationError:
-        raise HTTPException(422, "Invalid Telegram report")
+        return reply(db, sender, "telegram", key, UNREADABLE)
     result = await intake(db, payload)
     db.add(IntakeKey(id=key))
     db.commit()

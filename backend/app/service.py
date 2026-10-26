@@ -287,7 +287,11 @@ async def intake(db, payload: ReportIn, synthetic=False, use_ai=None):
         ack = acknowledgement(ticket, lang)
         queue(db, report, ack)
         if location["needs_clarification"]:
-            queue(db, report, CLARIFY[lang] + f" LOCATION {ticket} <landmark>")
+            queue(
+                db,
+                report,
+                CLARIFY.get(lang, CLARIFY["en"]) + f" LOCATION {ticket} <landmark>",
+            )
         db.commit()
         return {
             "report": report_json(report),

@@ -76,14 +76,20 @@ async def deliver(db, limit=50):
         return await _deliver(db, limit)
 
 
+def _configured_channels():
+    channels = []
+    if (
+        settings.sms_gateway_url
+        and settings.sms_gateway_user
+        and settings.sms_gateway_password
+    ):
+        channels.append("sms")
+    if settings.telegram_bot_token:
+        channels.append("telegram")
+    return channels
+
+
 async def _deliver(db, limit=50):
-    items = db.scalars(
-        select(Outbox)
-        .where(Outbox.status.in_(["queued", "failed"]), Outbox.attempts < 3)
-        .order_by(Outbox.created_at)
-        .limit(limit)
-    ).all()
-    sent = failed = 0
     if not settings.delivery_enabled:
         return {
             "processed": 0,
@@ -91,6 +97,19 @@ async def _deliver(db, limit=50):
             "failed": 0,
             "note": "Delivery disabled; messages retained in outbox.",
         }
+    # Select only sendable channels so a backlog for an unconfigured gateway
+    # cannot occupy every slot and starve the other channel.
+    items = db.scalars(
+        select(Outbox)
+        .where(
+            Outbox.status.in_(["queued", "failed"]),
+            Outbox.attempts < 3,
+            Outbox.channel.in_(_configured_channels()),
+        )
+        .order_by(Outbox.created_at)
+        .limit(limit)
+    ).all()
+    sent = failed = 0
     async with httpx.AsyncClient(timeout=15) as client:
         for item in items:
             contact = db.get(Contact, item.contact_id) if item.contact_id else None
@@ -99,13 +118,7 @@ async def _deliver(db, limit=50):
             if item.kind == "area_alert" and not contact.opted_in:
                 item.status = "cancelled"
                 continue
-            if contact.channel == "sms" and not (
-                settings.sms_gateway_url
-                and settings.sms_gateway_user
-                and settings.sms_gateway_password
-            ):
-                continue
-            if contact.channel == "telegram" and not settings.telegram_bot_token:
+            if contact.channel != item.channel:
                 continue
             item.attempts += 1
             try:
